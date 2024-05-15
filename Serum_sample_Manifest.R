@@ -1,5 +1,5 @@
 # Set working directory
-#setwd("/Users/Bm0211/RegEx/Water_Energy/")
+setwd("/Users/Bm0211/RegEx/Water_Energy/")
 getwd()
 # Load necessary libraries
 library(tidyverse)  # Includes dplyr, tidyr, readr, ggplot2
@@ -7,6 +7,8 @@ library(stringr)
 library(rio)
 library(openxlsx)
 library(lubridate)
+library(readr)
+library(readxl)
 # Get the current date
 current_date <- Sys.Date()
 # Format the date as 'MAY_1' (for example, 'May 1' becomes 'MAY_1')
@@ -104,6 +106,18 @@ FECAL_CM_May13 <- FECAL_CM_May13 %>%
 head(FECAL_CM_May13)
 dim(FECAL_CM_May13)
 
+##Samples SELECTED for NMR
+NMR_BOXES <- import("NMR_BOXES.csv")
+head(NMR_BOXES)
+#Merge BARCODE ID into Clean_Bar_ID
+NMR_BOXES <- NMR_BOXES %>%
+  mutate(
+    Barcode = str_remove_all(BARCODE, "\\D"),
+    ID = coalesce(as.character(ID), "unknown") %>% gsub("^0+", "", .),
+    Clean_Bar_ID = paste(Barcode, ID, sep = "_"),
+    FREEZER = "Wally_rack_b2"
+  ) %>%
+  dplyr::select(NMR_BOX_MAP_ID, Clean_Bar_ID, Previous_Box_Position)
 # Function to merge dataframes and handle duplicated columns from merging
 merge_and_handle_duplicates <- function(df1, df2) {
   merged_df <- merge(df1, df2, by = "Clean_Bar_ID", all = TRUE, suffixes = c(".x", ".y"))
@@ -129,6 +143,8 @@ Meta_Wally_LN_p5ml_Top <- merge_and_handle_duplicates(Meta_Wally_LN_p5ml, Top_Fr
 
 ##add Mpala samples
 Meta_Wally_LN_p5ml_Top <- merge_and_handle_duplicates(Meta_Wally_LN_p5ml_Top, FECAL_CM_May13)
+##Add NMR samples
+Meta_Wally_LN_p5ml_Top <- merge_and_handle_duplicates(Meta_Wally_LN_p5ml_Top, NMR_BOXES)
 # Final summarization and data clean-up
 Meta_Wally_LN_p5ml_Top <- Meta_Wally_LN_p5ml_Top %>%
   group_by(Clean_Bar_ID) %>%
@@ -171,8 +187,8 @@ PBMC_Sep <- import("FRPsamples_Sep_TurkanaOnly_forManifest.txt")
 names(PBMC_Sep)[2] <- "Sep_Processed"
 names(PBMC_Sep)[3] <- "Sep_QC"
 PBMC_Cryo <- import("FRPsamples_CPT_TurkanaOnly_forManifest.txt")
-names(PBMC_Cryo)[2] <- "Cryo_Processed"
-names(PBMC_Cryo)[3] <- "Cryo_QC"
+names(PBMC_Cryo)[2] <- "CPT_Processed"
+names(PBMC_Cryo)[3] <- "CPT_QC"
 ##Merge the two dataframes by Unique.ID
 PBMC_all <- merge(PBMC_Sep, PBMC_Cryo, by = "Unique.ID", all = TRUE)
 ##Merge to Larger Data
@@ -180,19 +196,46 @@ PBMC_X_SERUM <- merge(PBMC_all, all_non_matching_MANUALadded, by = "Unique.ID", 
 ##Drop NA in the Unique.ID column
 PBMC_X_SERUM <- PBMC_X_SERUM %>% drop_na(Unique.ID)
 ##Select relevnt columns for Manifest
-PBMC_X_SERUM <- dplyr::select(PBMC_X_SERUM, c("Unique.ID", "Sep_Processed", "Sep_QC", "Cryo_Processed", "Cryo_QC", "WALLY_2ML", "LN_2ML", "p5ML" , "top2ML" ,"metabRunNum", "Vanderbilt", "NAP_fecal", "Formalin_fecal", "ETOH_fecal", "FREEZER", "FREEZER_FECAL","NOTES","Age", "Sex", "Sampling.location"))
+PBMC_X_SERUM <- dplyr::select(PBMC_X_SERUM, c("Unique.ID", "NMR_BOX_MAP_ID", "Previous_Box_Position","Sep_Processed", "Sep_QC", "CPT_Processed", "CPT_QC", "WALLY_2ML", "LN_2ML", "p5ML", "top2ML","Combined_Fecal", "FREEZER", "FREEZER_FECAL","NOTES","Age", "Sex", "Sampling.location","metabRunNum", "Vanderbilt"))
 
 dim(PBMC_X_SERUM)
+colnames(PBMC_X_SERUM)
+
 ##
+
+##
+
+##
+
+##
+
+##ADD BLOOD DNA DATA
+#./CHARLESDATA.py AND ./BDNA_BAGS.py python script to organize the data accordingly
+# Import the first sheet from the Excel file
+input_filename <- "bDNA_CM_MAY_15.xlsx"
+# Import the first sheet from the Excel file
+Bdna <- read_excel(input_filename, sheet = 3)
+head(Bdna)
+long_data <- data %>%
+  pivot_longer(cols = everything(), names_to = "Bag", values_to = "Unique_ID") %>%
+  filter(!is.na(Unique_ID))  # Remove rows with NA
+# Display the transformed data
+print(transformed_data)
+
+
+
 # Construct the filename with the current date
 filename <- paste0("PBMC_X_SERUM_", formatted_date, ".csv")
 # Write the DataFrame to a CSV file with the dynamic filename
 write.csv(PBMC_X_SERUM, filename, row.names = FALSE)
 
 # Writing Box Maps with p5ml tubes as example
-Sample_manifest <- read_csv("/Users/Bm0211/RegEx/Water_Energy/PBMC_X_SERUM_MAY_01.csv")
-colnames(Sample_manifest)
-sample_map_meta <- select(Sample_manifest, Unique.ID, p5ML) ##Change to "p5ML" "top2ML" "LN_2ML" "WALLY_2ML"
+input_filename <- paste0("/Users/Bm0211/RegEx/Water_Energy/PBMC_X_SERUM_", formatted_date, ".csv")
+output_filename <- paste0("Sample_Position_Grids_p5Ml_", formatted_date, ".xlsx")
+# Reading Sample Manifest
+Sample_manifest <- read_csv(input_filename)
+# Select necessary columns
+sample_map_meta <- select(Sample_manifest, Unique.ID, p5ML)  # Change to "p5ML", "top2ML", "LN_2ML", "WALLY_2ML"
 # Preprocess the data to handle multiple identifiers
 sample_map_meta <- sample_map_meta %>%
   separate_rows(p5ML, sep = ",") %>%
@@ -236,6 +279,35 @@ for (box in unique_boxes) {
   addWorksheet(wb, sheetName = sheet_name)
   writeData(wb, sheet = sheet_name, grid_df)
 }
+# Save workbook with the dynamic filename
+saveWorkbook(wb, output_filename, overwrite = TRUE)
 
-# Save workbook
-saveWorkbook(wb, "Sample_Position_Grids_p5Ml.xlsx", overwrite = TRUE)
+##Read in the Manifest and remove those that were chosen for NMR
+Manifest_2 <- import(input_filename)
+# Function to remove NMR_BOX_MAP_IDs from Manifest
+remove_ids <- function(column, ids_to_remove) {
+  sapply(column, function(cell) {
+    if (is.na(cell)) return(cell)
+    items <- unlist(str_split(cell, ","))
+    items <- items[!items %in% ids_to_remove]
+    paste(items, collapse = ",")
+  })
+}
+# Get the unique identifiers to remove
+ids_to_remove <- Manifest_2$Previous_Box_Position ##Flexible to remove anything
+# Apply the function to the specified columns
+Manifest_2 <- Manifest_2 %>%
+  mutate(
+    WALLY_2ML = remove_ids(WALLY_2ML, ids_to_remove),
+    LN_2ML = remove_ids(LN_2ML, ids_to_remove),
+    p5ML = remove_ids(p5ML, ids_to_remove),
+    top2ML = remove_ids(top2ML, ids_to_remove)
+  )
+colnames(Manifest_2)
+##Drop column "Previous_Box_Position", "Age", "Sex"
+Manifest_2 <- dplyr::select(Manifest_2, -c("Previous_Box_Position", "Age", "Sex"))
+
+# Construct the filename with the current date
+filename <- paste0("MANIFEST_NMR_REMOVED_", formatted_date, ".csv")
+# Write the DataFrame to a CSV file with the dynamic filename
+write.csv(Manifest_2, filename, row.names = FALSE)
