@@ -17,6 +17,7 @@ formatted_date <- toupper(formatted_date)  # Convert to uppercase
 
 # Import data
 All_data <- import("THGP_database_full_corrected_merged_2024-05-06.txt")
+dim(All_data)
 # Calculate the household style of life index and prepare the data
 colnames(All_data)
 All_data <- All_data %>%
@@ -40,10 +41,16 @@ Freezer_wally <- read_csv("Freezer_Wally.csv") %>%
     Sample_ID = if_else(Sample_ID == "0", "0", gsub("^0+", "", Sample_ID)),  # Remove leading zeros,
     Clean_Bar_ID = paste(Sample_Barcode, Sample_ID, sep = "_"),
     NOTES = coalesce(Sample_Notes, ""),
-    FREEZER = "WALLY_rack_C1|B1|D1"  ##This can me easily changed to match FREEZER LOCATION
+    FREEZER = "WALLY_rack_B1|C1|D1"  ##This can me easily changed to match FREEZER LOCATION
   ) %>%
   rename(WALLY_2ML = Box_map_ID) %>%
   dplyr::select(WALLY_2ML, NOTES, Clean_Bar_ID, FREEZER)
+##Highlight the Pastoralist Project samples
+Pastoralist_project <- import("PASTORALIST_PROJECT.csv")
+Pastoralist_project <- Pastoralist_project %>%
+  mutate(Clean_Bar_ID = str_trim(as.character(Clean_Bar_ID)))
+Freezer_wally <- merge(Freezer_wally, Pastoralist_project, by = "Clean_Bar_ID", all.x = T)
+dim(Freezer_wally)
 
 # Import p5ml tubes data
 p5ml_tubes <- read_csv("p5mlCombinedsheet.csv") %>%
@@ -58,7 +65,8 @@ p5ml_tubes <- read_csv("p5mlCombinedsheet.csv") %>%
   rename(NOTES = p5mltube_notes)  %>%
   rename(p5ML = Box_map_ID)  %>%
   dplyr::select(p5ML, NOTES, Clean_Bar_ID, FREEZER)
-
+p5ml_tubes <- merge(p5ml_tubes, Pastoralist_project, by = "Clean_Bar_ID", all.x = T)
+dim(p5ml_tubes)
 # Import and process two_ml_tubes data
 two_ml_tubes <- read_csv("Liq_Nit_Boxes_Combined_sheet.csv") %>%
   dplyr::select(Box_map_ID, Sample_Barcode, Sample_ID, Barcode_ID_LN) %>%
@@ -71,6 +79,8 @@ two_ml_tubes <- read_csv("Liq_Nit_Boxes_Combined_sheet.csv") %>%
   )  %>%
   rename(LN_2ML = Box_map_ID) %>%
   dplyr::select(LN_2ML, Clean_Bar_ID, FREEZER)
+two_ml_tubes <- merge(two_ml_tubes, Pastoralist_project, by = "Clean_Bar_ID", all.x = T)
+dim(two_ml_tubes)
 # Import and process Top_Freeze data
 Top_Freeze <- read_csv("Top_Freezer.csv") %>%
   mutate(
@@ -84,15 +94,27 @@ Top_Freeze <- read_csv("Top_Freezer.csv") %>%
   rename(top2ML = Box_map_ID) %>%
   dplyr::select(top2ML, NOTES, Clean_Bar_ID, FREEZER)
 
+# Import and LAST_BATCH data
+LAST_BATCH <- read_csv("LAST_BATCH.csv") %>%
+  mutate(
+    Barcode = str_remove_all(Barcode, "\\D"),
+    ID = coalesce(as.character(ID), "unknown"),  
+    ID = if_else(ID == "0", "0", gsub("^0+", "", ID)),
+    Clean_Bar_ID = paste(Barcode, ID, sep = "_"),
+    FREEZER = "WALLY_rack_A1",
+    NOTES = coalesce(Notes, "")
+  )  %>%
+  rename(old_smpls = Box_map_ID) %>%
+  dplyr::select(old_smpls, NOTES, Clean_Bar_ID, FREEZER)
+
+head(LAST_BATCH)
 ##Import and process FECAL Manifest
 FECAL_CM_May13 <- import("FECAL_CM_May13.csv")
-
 colnames(FECAL_CM_May13)[9] <- "FREEZER_FECAL"
 colnames(FECAL_CM_May13)[6] <- "NAP_fecal"
 colnames(FECAL_CM_May13)[7] <- "Formalin_fecal"
 colnames(FECAL_CM_May13)[8] <- "ETOH_fecal"
 colnames(FECAL_CM_May13)[2] <- "DATE_FECAL"
-
 FECAL_CM_May13 <- FECAL_CM_May13 %>%
   mutate(
     DATE = as.Date(str_replace(DATE_FECAL, "th", ""), format = "%d %B %Y"),
@@ -103,9 +125,6 @@ FECAL_CM_May13 <- FECAL_CM_May13 %>%
   ) %>%
   select(Combined_Fecal, Clean_Bar_ID, FREEZER_FECAL)
 ##
-head(FECAL_CM_May13)
-dim(FECAL_CM_May13)
-
 ##Samples SELECTED for NMR
 NMR_BOXES <- import("NMR_BOXES.csv")
 head(NMR_BOXES)
@@ -140,48 +159,74 @@ Meta_Wally <- merge_and_handle_duplicates(All_data, Freezer_wally)
 Meta_Wally_LN <- merge_and_handle_duplicates(Meta_Wally, two_ml_tubes)
 Meta_Wally_LN_p5ml <- merge_and_handle_duplicates(Meta_Wally_LN, p5ml_tubes)
 Meta_Wally_LN_p5ml_Top <- merge_and_handle_duplicates(Meta_Wally_LN_p5ml, Top_Freeze)
-
+Meta_Wally_LN_p5ml_Top <- merge_and_handle_duplicates(Meta_Wally_LN_p5ml_Top, LAST_BATCH)
 ##add Mpala samples
 Meta_Wally_LN_p5ml_Top <- merge_and_handle_duplicates(Meta_Wally_LN_p5ml_Top, FECAL_CM_May13)
 ##Add NMR samples
 Meta_Wally_LN_p5ml_Top <- merge_and_handle_duplicates(Meta_Wally_LN_p5ml_Top, NMR_BOXES)
 # Final summarization and data clean-up
+##Concatenate Using BAR_ID
 Meta_Wally_LN_p5ml_Top <- Meta_Wally_LN_p5ml_Top %>%
   group_by(Clean_Bar_ID) %>%
   summarise(across(everything(), ~paste(unique(.), collapse = ","), .names = "{.col}"),
             .groups = "drop")
-
+###################################################################################
+##Here I was checking for those that did not merge
+#Write file and manually check those that did not match the Data_base
+##I clean them manually to check what might be causing the mis_match
+###########################################################################################
+#write.csv(Meta_Wally_LN_p5ml_Top, "TESTMeta_Wally_LN_p5ml_Top.csv", row.names = FALSE)
+###########################################################################################
 # Import non-matching data
-all_non_matching_MANUAL <- import("all_non_matching_MANUAL.csv")
-##Merge to Meta_Wally_LN_p5ml using Clean_Bar_ID and NEW_label columns
-all_non_matching_MANUAL$Box_map_ID <- paste(all_non_matching_MANUAL$Box_map_ID_Top_Freeze, 
-                                            all_non_matching_MANUAL$Boxmap_ID_WALLY,
-                                            all_non_matching_MANUAL$Box_map_ID_LN,
-                                            all_non_matching_MANUAL$Box_map_ID_p5ml, sep = "|")
-all_non_matching_MANUAL <- dplyr::select(all_non_matching_MANUAL, c(2, 7, 8))
-names(all_non_matching_MANUAL)[2] <- "NOTES"
-names(all_non_matching_MANUAL)[1] <- "Clean_Bar_ID"
-all_non_matching_MANUALadded <- merge_and_handle_duplicates(Meta_Wally_LN_p5ml_Top, all_non_matching_MANUAL)
-colnames(all_non_matching_MANUALadded)
-dim(all_non_matching_MANUALadded)
+NON_MATCHING2 <- import("NON_MATCHING.csv")
+head(NON_MATCHING2)
+dim(NON_MATCHING2)
+NON_MATCHING2$NON_Matching_recovered <- paste(NON_MATCHING2$WALLY_2ML, 
+                                              NON_MATCHING2$LN_2ML,
+                                              NON_MATCHING2$p5ML,
+                                              NON_MATCHING2$top2ML, 
+                                              NON_MATCHING2$old_smpls, sep = "|")
+NON_MATCHING2 <- dplyr::select(NON_MATCHING2, c(2,8:12))
+names(NON_MATCHING2)[1] <- "Clean_Bar_ID"
+dim(NON_MATCHING2)
+# Add a sequential ID for "Not_in_database"
+all_non_matching_MANUALadded <- NON_MATCHING2 %>%
+  group_by(Clean_Bar_ID) %>%
+  mutate(
+    Clean_Bar_ID = if_else(Clean_Bar_ID == "Not_in_database",
+                           paste0("Not_in_database_", row_number()),
+                           Clean_Bar_ID)
+  ) %>%
+  ungroup()
+# Verify the results
+table(all_non_matching_MANUALadded$Clean_Bar_ID)
+##Merge Back the Non_matching ones
+all_non_matching_MANUALadded <- merge_and_handle_duplicates(all_non_matching_MANUALadded, Meta_Wally_LN_p5ml_Top)
+######################
 all_non_matching_MANUALadded <- all_non_matching_MANUALadded %>%
   group_by(Clean_Bar_ID) %>%
   slice(1) %>%
   ungroup()
-dim(all_non_matching_MANUALadded)
 ##Load other sample information
 Vanderbilt_data <- import("Clean_samples_concatenateedited.xlsx", which = "Vanderbilt_samples")
 Vanderbilt_data <- dplyr::select(Vanderbilt_data, c(1,3))
 names(Vanderbilt_data)[2] <- "Vanderbilt"
 Metabolomics_STUFF <- import("batchMap_with_Meta.csv")
 Metabolomics_STUFF <- dplyr::select(Metabolomics_STUFF, c(1,2))
-
-all_non_matching_MANUALadded <- merge(all_non_matching_MANUALadded, Metabolomics_STUFF, by = "Unique.ID", all.x = TRUE)
-all_non_matching_MANUALadded <- merge(all_non_matching_MANUALadded, Vanderbilt_data, by = "Unique.ID", all.x = TRUE)
+##########################
+#IMPORTANT
+##################
+# Impute Unique.ID with Clean_Bar_ID if Unique.ID is NA
+Other_meta_added <- all_non_matching_MANUALadded %>%
+  mutate(across(everything(), ~ na_if(., "NA"))) %>%
+  mutate(Unique.ID = if_else(is.na(Unique.ID), Clean_Bar_ID, Unique.ID))
+##
+Other_meta_added <- merge(Other_meta_added, Metabolomics_STUFF, by = "Unique.ID", all.x = TRUE)
+Other_meta_added <- merge(Other_meta_added, Vanderbilt_data, by = "Unique.ID", all.x = TRUE)
 # Write the final merged and cleaned data to a CSV file
-dim(all_non_matching_MANUALadded)
+dim(Other_meta_added)
 #write.csv(all_non_matching_MANUALadded, "Serum_Samples_Apr_26.csv", row.names = FALSE)
-
+###########################################################################################
 ##read in the PBMC Sep 
 PBMC_Sep <- import("FRPsamples_Sep_TurkanaOnly_forManifest.txt")
 names(PBMC_Sep)[2] <- "Sep_Processed"
@@ -192,58 +237,97 @@ names(PBMC_Cryo)[3] <- "CPT_QC"
 ##Merge the two dataframes by Unique.ID
 PBMC_all <- merge(PBMC_Sep, PBMC_Cryo, by = "Unique.ID", all = TRUE)
 ##Merge to Larger Data
-PBMC_X_SERUM <- merge(PBMC_all, all_non_matching_MANUALadded, by = "Unique.ID", all = TRUE)
+PBMC_X_SERUM <- merge(PBMC_all, Other_meta_added, by = "Unique.ID", all = TRUE)
 ##Drop NA in the Unique.ID column
 PBMC_X_SERUM <- PBMC_X_SERUM %>% drop_na(Unique.ID)
-##Select relevnt columns for Manifest
-PBMC_X_SERUM <- dplyr::select(PBMC_X_SERUM, c("Unique.ID", "NMR_BOX_MAP_ID", "Previous_Box_Position","Sep_Processed", "Sep_QC", "CPT_Processed", "CPT_QC", "WALLY_2ML", "LN_2ML", "p5ML", "top2ML","Combined_Fecal", "FREEZER", "FREEZER_FECAL","NOTES","Age", "Sex", "Sampling.location","metabRunNum", "Vanderbilt"))
-
-dim(PBMC_X_SERUM)
-colnames(PBMC_X_SERUM)
-
-##
-
-##
-
-##
-
-##
-
+#####################################################################################
 ##ADD BLOOD DNA DATA
 #./CHARLESDATA.py AND ./BDNA_BAGS.py python script to organize the data accordingly
-# Import the first sheet from the Excel file
-input_filename <- "bDNA_CM_MAY_15.xlsx"
-# Import the first sheet from the Excel file
-Bdna <- read_excel(input_filename, sheet = 3)
-head(Bdna)
-long_data <- data %>%
-  pivot_longer(cols = everything(), names_to = "Bag", values_to = "Unique_ID") %>%
-  filter(!is.na(Unique_ID))  # Remove rows with NA
-# Display the transformed data
-print(transformed_data)
-
-
-
+###################################################################################
+##Import Python transformed files
+Boxed_maps <- import("B_DNA_transformed_data_combined.csv")
+# Extract the first part of the Unique_ID to create Clean_Bar_ID and remove trailing zeros
+Boxed_maps <- Boxed_maps %>%
+  mutate(Clean_Bar_ID = str_extract(Unique_ID, "\\d+_\\d+"),
+         Clean_Bar_ID = sub("_0*(\\d+)", "_\\1", Clean_Bar_ID))
+colnames(Boxed_maps)
+names(Boxed_maps)[1] <- "UID_bDNA_Charles_M"
+# Import the bag data
+baged_maps <- import("BAG_BOX.csv")
+# Extract the Unique_ID
+baged_maps <- baged_maps %>%
+  mutate(Clean_Bar_ID = str_extract(Unique_ID, "(\\d+_\\d+)$"),
+         Clean_Bar_ID = sub("_0*(\\d+)$", "_\\1", Clean_Bar_ID))
+names(baged_maps)[1] <- "UID_bDNA_Charles_M"
+##
+COMBI_bDNA <- merge_and_handle_duplicates(baged_maps, Boxed_maps)
+names(COMBI_bDNA)[2] <- "Bag_containing_Bdna_sample"
+names(COMBI_bDNA)[3] <- "BOX_containing_Bdna_sample"
+##Concatenate data based on the Clean_Bar_ID
+COMBI_bDNA <- COMBI_bDNA %>%
+  group_by(Clean_Bar_ID) %>%
+  summarise(across(everything(), ~paste(unique(na.omit(.)), collapse = ", ")))
+######################################################################################################
+##Add Blood_DNA_DATA to Manifest
+PBMC_X_SERUM <- merge_and_handle_duplicates(PBMC_X_SERUM, COMBI_bDNA)
+##Select relevnt columns for Manifest
+PBMC_X_SERUM <- dplyr::select(PBMC_X_SERUM, c("Unique.ID", "h_sol","NMR_BOX_MAP_ID", "Previous_Box_Position","Sep_Processed", "Sep_QC", "CPT_Processed", "CPT_QC", "WALLY_2ML", "LN_2ML","old_smpls", "p5ML", "top2ML","Combined_Fecal", "FREEZER", "FREEZER_FECAL","NOTES","Age", "Sex", "Sampling.location","metabRunNum", "Vanderbilt", "Bag_containing_Bdna_sample", "BOX_containing_Bdna_sample", "UID_bDNA_Charles_M", "NON_Matching_recovered"))
+dim(PBMC_X_SERUM)
 # Construct the filename with the current date
-filename <- paste0("PBMC_X_SERUM_", formatted_date, ".csv")
+filename <- paste0("PBMC_X_SERUM_X_FECAL_X_bDNA_", formatted_date, ".csv")
 # Write the DataFrame to a CSV file with the dynamic filename
 write.csv(PBMC_X_SERUM, filename, row.names = FALSE)
+####################################################################################################
+###################################################################################################
+##Read in the Manifest and remove those that were chosen for NMR
+input_filename <- paste0("/Users/Bm0211/RegEx/Water_Energy/PBMC_X_SERUM_X_FECAL_X_bDNA_", formatted_date, ".csv")
+Manifest_2 <- import(input_filename)
+# Function to remove NMR_BOX_MAP_IDs from Manifest
+remove_ids <- function(column, ids_to_remove) {
+  sapply(column, function(cell) {
+    if (is.na(cell)) return(cell)
+    items <- unlist(str_split(cell, ","))
+    items <- items[!items %in% ids_to_remove]
+    paste(items, collapse = ",")
+  })
+}
+# Get the unique identifiers to remove
+ids_to_remove <- Manifest_2$Previous_Box_Position ##Flexible to remove anything
+# Apply the function to the specified columns
+Manifest_2 <- Manifest_2 %>%
+  mutate(
+    WALLY_2ML = remove_ids(WALLY_2ML, ids_to_remove),
+    LN_2ML = remove_ids(LN_2ML, ids_to_remove),
+    p5ML = remove_ids(p5ML, ids_to_remove),
+    top2ML = remove_ids(top2ML, ids_to_remove)
+  )
+colnames(Manifest_2)
+##Drop column "Previous_Box_Position", "Age", "Sex"
+Manifest_2 <- dplyr::select(Manifest_2, -c("Previous_Box_Position", "Age", "Sex"))
+# Construct the filename with the current date
+filename <- paste0("MANIFEST_NMR_REMOVED_", formatted_date, ".csv")
+# Write the DataFrame to a CSV file with the dynamic filename
+write.csv(Manifest_2, filename, row.names = FALSE)
 
-# Writing Box Maps with p5ml tubes as example
-input_filename <- paste0("/Users/Bm0211/RegEx/Water_Energy/PBMC_X_SERUM_", formatted_date, ".csv")
-output_filename <- paste0("Sample_Position_Grids_p5Ml_", formatted_date, ".xlsx")
+#############################################################################################
+# Writing Box Maps
+##Change the column to get the box map you want
+## e.g.    p5ml     for the 0.5ml tubes   ## and LN_2ML for those in liquid nitrogen
+###########################################################################################
+input_filename <- paste0("/Users/Bm0211/RegEx/Water_Energy/MANIFEST_NMR_REMOVED_", formatted_date, ".csv")
+output_filename <- paste0("Sample_Position_Grids_old_smpls_", formatted_date, ".xlsx")
 # Reading Sample Manifest
 Sample_manifest <- read_csv(input_filename)
 # Select necessary columns
-sample_map_meta <- select(Sample_manifest, Unique.ID, p5ML)  # Change to "p5ML", "top2ML", "LN_2ML", "WALLY_2ML"
+sample_map_meta <- select(Sample_manifest, Unique.ID, old_smpls)  # Change to "old_smpls","p5ML", "top2ML", "LN_2ML", "WALLY_2ML" "NMR_BOX_MAP_ID
 # Preprocess the data to handle multiple identifiers
 sample_map_meta <- sample_map_meta %>%
-  separate_rows(p5ML, sep = ",") %>%
+  separate_rows(old_smpls, sep = ",") %>%
   mutate(
     # Extract the box type and number, ensuring any trailing underscores are handled
-    Box_Number = gsub("(.*_)[0-9]+$", "\\1", p5ML),
+    Box_Number = gsub("(.*_)[0-9]+$", "\\1", old_smpls),
     # Extract the last numeric sequence for position
-    Position = as.numeric(gsub("^.*_([0-9]+)$", "\\1", p5ML))
+    Position = as.numeric(gsub("^.*_([0-9]+)$", "\\1", old_smpls))
   ) %>%
   drop_na(Position)
 # Initialize a workbook
@@ -282,32 +366,3 @@ for (box in unique_boxes) {
 # Save workbook with the dynamic filename
 saveWorkbook(wb, output_filename, overwrite = TRUE)
 
-##Read in the Manifest and remove those that were chosen for NMR
-Manifest_2 <- import(input_filename)
-# Function to remove NMR_BOX_MAP_IDs from Manifest
-remove_ids <- function(column, ids_to_remove) {
-  sapply(column, function(cell) {
-    if (is.na(cell)) return(cell)
-    items <- unlist(str_split(cell, ","))
-    items <- items[!items %in% ids_to_remove]
-    paste(items, collapse = ",")
-  })
-}
-# Get the unique identifiers to remove
-ids_to_remove <- Manifest_2$Previous_Box_Position ##Flexible to remove anything
-# Apply the function to the specified columns
-Manifest_2 <- Manifest_2 %>%
-  mutate(
-    WALLY_2ML = remove_ids(WALLY_2ML, ids_to_remove),
-    LN_2ML = remove_ids(LN_2ML, ids_to_remove),
-    p5ML = remove_ids(p5ML, ids_to_remove),
-    top2ML = remove_ids(top2ML, ids_to_remove)
-  )
-colnames(Manifest_2)
-##Drop column "Previous_Box_Position", "Age", "Sex"
-Manifest_2 <- dplyr::select(Manifest_2, -c("Previous_Box_Position", "Age", "Sex"))
-
-# Construct the filename with the current date
-filename <- paste0("MANIFEST_NMR_REMOVED_", formatted_date, ".csv")
-# Write the DataFrame to a CSV file with the dynamic filename
-write.csv(Manifest_2, filename, row.names = FALSE)

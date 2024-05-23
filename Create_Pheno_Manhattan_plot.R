@@ -650,7 +650,7 @@ summary(anova_model)
 pairwise_results <- emmeans(anova_model, pairwise ~ `What.is.your.drinking.water.source.`, adjust = "tukey")
 contrast_results <- contrast(emm_results, "trt.vs.ctrl1", ref = 1) 
 summary(contrast_results)
-
+colnames(filtered_meta)
 # Plot
 ggplot(filtered_meta, aes(x = `What.is.your.drinking.water.source.`, y = `Number.of.children`)) +
   geom_boxplot(aes(fill = `What.is.your.drinking.water.source.`), outlier.shape = NA) +
@@ -695,13 +695,6 @@ summary_stats <- filtered_meta %>%
     .groups = 'drop'
   )
 
-# Fit an ANOVA model for both age groups
-anova_model <- aov(`Number.of.children` ~ `What.is.your.drinking.water.source.` * Age_Group, data = filtered_meta)
-summary(anova_model)
-
-# Pairwise comparisons with "River/Stream" as a reference
-pairwise_results <- emmeans(anova_model, pairwise ~ `What.is.your.drinking.water.source.` | Age_Group, adjust = "tukey")
-
 # Plot with side-by-side facets for age groups
 ggplot(filtered_meta, aes(x = `What.is.your.drinking.water.source.`, y = `Number.of.children`)) +
   geom_boxplot(aes(fill = `What.is.your.drinking.water.source.`), outlier.shape = NA) +
@@ -713,8 +706,69 @@ ggplot(filtered_meta, aes(x = `What.is.your.drinking.water.source.`, y = `Number
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1), plot.title = element_text(hjust = 0.5))
 
-# Check distribution of water sources by age group
-table(filtered_meta$`What.is.your.drinking.water.source.`, filtered_meta$Age_Group)
+
+table(filtered_meta$What.is.your.drinking.water.source.)
+
+library(dplyr)
+library(ggplot2)
+
+# Remove rows with missing values
+filtered_meta <- filtered_meta %>%
+  filter(!is.na(Number.of.children), !is.na(What.is.your.drinking.water.source.), !is.na(Age))
+
+dim(filtered_meta)
+
+# Fit a Poisson regression model
+poisson_model <- glm(`Number.of.children` ~ `What.is.your.drinking.water.source.` + Age, 
+                     family = poisson(link = "log"), data = filtered_meta)
+summary(poisson_model)
+
+# Extract coefficients and create a data frame for plotting
+coefficients_summary <- summary(poisson_model)$coefficients
+coefficients_df <- as.data.frame(coefficients_summary)
+coefficients_df$Predictor <- rownames(coefficients_df)
+
+# Define significance levels
+coefficients_df <- coefficients_df %>%
+  mutate(Significance = case_when(
+    `Pr(>|z|)` < 0.001 ~ "***",
+    `Pr(>|z|)` < 0.01 ~ "**",
+    `Pr(>|z|)` < 0.05 ~ "*",
+    `Pr(>|z|)` < 0.1 ~ ".",
+    TRUE ~ ""
+  ))
+
+# Filter out the intercept
+coefficients_df <- coefficients_df %>% filter(Predictor != "(Intercept)")
+
+# Rename the predictors for better readability and set the order
+coefficients_df$Predictor <- factor(coefficients_df$Predictor, 
+                                    levels = c("Age", 
+                                               "What.is.your.drinking.water.source.Lake", 
+                                               "What.is.your.drinking.water.source.Well", 
+                                               "What.is.your.drinking.water.source.Borehole", 
+                                               "What.is.your.drinking.water.source.Reliable_water", 
+                                               "What.is.your.drinking.water.source.Tap"),
+                                    labels = c("Age", "Lake", "Well", "Borehole", "Reliable_water", "Tap"))
+
+# Plot the estimates with standard errors and significance
+plot <- ggplot(coefficients_df, aes(x = Predictor, y = Estimate)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = Estimate - `Std. Error`, ymax = Estimate + `Std. Error`), width = 0.2) +
+  geom_text(aes(label = Significance, y = Estimate + `Std. Error` + 0.02), color = "red") +
+  labs(x = "Predictor", y = "Estimate", 
+       title = "Estimates, Standard Errors, and Significance of Water Source Predictors") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), 
+        plot.title = element_text(hjust = 0.5))
+
+print(plot)
+
+
+# Print the coefficients summary with z-value and significance levels
+coefficients_df %>%
+  select(Predictor, Estimate, `Std. Error`, `z value`, Significance) %>%
+  print(row.names = FALSE)
 
 
 
